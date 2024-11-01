@@ -19,12 +19,21 @@ class HandTrackingDynamic:
         # is turtle started
         self.isTurtleStarted = False
 
+        # is turtle reversed
+        self.isTurtleReversed = False
+
         # gesture detection on robot
-        self.press_down = False
+        self.press_down_start = False
+        self.press_down_reverse = False
 
     def findFingers(self, frame, draw=True):
-        # print(frame)
-        imgRGB = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        try:
+            imgRGB = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        except cv2.error as e:
+            print(
+                "NOTE: This error happens every so often. If you run it again, it should work."
+            )
+            raise e
         self.results = self.hands.process(imgRGB)
         if self.results.multi_hand_landmarks:
             for handLms in self.results.multi_hand_landmarks:
@@ -119,18 +128,34 @@ class HandTrackingDynamic:
         angle = calculate_hand_angle(wrist, middle)
         return angle
 
-    def check_gesture(self):
-        thumb_tip = self.lmsSet[4]
-        index_tip = self.lmsSet[8]
+    def check_gesture(self, gesture):
+        finger_one = self.lmsSet[4]  # thumb
 
-        distance = calculate_distance(thumb_tip, index_tip)
+        if gesture == "start":
+            finger_two = self.lmsSet[8]  # index
 
-        if distance < 25 and not self.press_down:
-            self.press_down = True
-        elif distance > 25 and self.press_down:
-            self.press_down = False
-            return True
-        return False
+        elif gesture == "reverse":
+            finger_two = self.lmsSet[20]  # pinky
+
+        distance = calculate_distance(finger_one, finger_two)
+
+        # smoothing the gesture detection for press and release
+        if distance < 25:
+            if gesture == "start" and not self.press_down_start:
+                self.press_down_start = not self.press_down_start
+                return False
+            elif gesture == "reverse" and not self.press_down_reverse:
+                self.press_down_reverse = not self.press_down_reverse
+                return False
+        else:
+            if gesture == "start" and self.press_down_start:
+                self.press_down_start = not self.press_down_start
+                return True
+            elif gesture == "reverse" and self.press_down_reverse:
+                self.press_down_reverse = not self.press_down_reverse
+                return True
+            else:
+                return False
 
 
 def calculate_distance(point1, point2):
@@ -151,29 +176,94 @@ def calculate_distance(point1, point2):
     return distance
 
 
-def draw_turtle(frame, angle_radians, has_arrow=False):
-    rectangle_width = 100
-    rectangle_height = 50
-    arrow_length = 50
+def draw_turtle(frame):
+    """Draws the a background rectangle and a circle on the screen to represent the turtle."""
 
     frame_height, frame_width, _ = frame.shape
-    x = (frame_width - rectangle_width) // 2
-    y = frame_height - rectangle_height
-    cv2.circle(
+
+    background_rect_height = 125
+    background_rect_width = 100
+    cv2.rectangle(
         frame,
-        (frame_width // 2, y),
-        min(rectangle_width, rectangle_height) // 2,
-        (0, 171, 102),
+        (0, frame_height - background_rect_height),
+        (background_rect_width, frame_height),
+        (208, 253, 255),
         -1,
+        lineType=cv2.LINE_AA,
     )
 
+    circle_x = 50
+    circle_y = frame_height - 50
+    cv2.circle(
+        frame,
+        (circle_x, circle_y),
+        24,
+        (0, 171, 102),
+        -1,
+        lineType=cv2.LINE_AA,
+    )
+
+
+def draw_turtle_arrow(frame, angle_radians, has_arrow=False, is_reversed=False):
+    """Draws an arrow on the screen to represent the turtle's direction."""
+
+    frame_height, frame_width, _ = frame.shape
+
+    circle_x = 50
+    circle_y = frame_height - 50
+
+    arrow_length = 50
+
+    if is_reversed:
+        angle_radians = -angle_radians
+
     end_point = (
-        x + rectangle_height + int(arrow_length * math.cos(angle_radians)),
-        y + int(arrow_length * math.sin(angle_radians)),
+        circle_x + int(arrow_length * math.cos(angle_radians)),
+        circle_y + int(arrow_length * math.sin(angle_radians)),
     )
 
     if has_arrow:
-        cv2.arrowedLine(frame, (x + rectangle_height, y), end_point, (255, 0, 0), 2)
+        cv2.arrowedLine(
+            frame,
+            (circle_x, circle_y),
+            end_point,
+            (255, 0, 0),
+            2,
+            line_type=cv2.LINE_AA,
+        )
+
+
+def turtle_direction(frame, angle_radians, has_arrow=False, is_reversed=False):
+    frame_height, frame_width, _ = frame.shape
+    angle_degrees = math.degrees(angle_radians)
+
+    if has_arrow:
+        # this is hardcoded based on the way we calculate the angle
+        if angle_degrees < -120 or angle_degrees > 120:
+            direction_text = "Left"
+        elif 40 <= angle_degrees <= 120:
+            direction_text = "Backward"
+        elif -60 <= angle_degrees <= 40:
+            direction_text = "Right"
+        elif -120 <= angle_degrees <= -60:
+            direction_text = "Forward"
+        else:
+            direction_text = "Broken"
+    else:
+        direction_text = "Stopped"
+
+    cv2.putText(
+        frame,
+        f"{direction_text}",
+        (0, frame_height - 110),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 0, 0),
+        1,
+        lineType=cv2.LINE_AA,
+    )
+
+    return direction_text
 
 
 def calculate_hand_angle(circle_center, hand_center):
@@ -219,26 +309,34 @@ def main():
 
         frame = detector.findFingers(frame)
         lmsSet, bbox = detector.findPosition(frame, draw=True)
-        if lmsSet:  # check if dict not empty
 
-            # find the angle of the fist gesture
+        draw_turtle(frame)
+        if lmsSet:  # check if hand is not empty
+
+            # find the angle of the hand gesture
             angle_radians = detector.handAngle()
 
-            # figure this out later - need to make sure each gesture is only detected once
-            if detector.check_gesture():
+            # check if the start or reverse gesture is detected
+            if detector.check_gesture("start"):
                 detector.isTurtleStarted = not detector.isTurtleStarted
+            elif detector.check_gesture("reverse"):
+                detector.isTurtleReversed = not detector.isTurtleReversed
 
-            draw_turtle(frame, angle_radians, detector.isTurtleStarted)
+            # this function draws the arrow and returns the desired direction
+            draw_turtle_arrow(
+                frame,
+                angle_radians,
+                detector.isTurtleStarted,
+                detector.isTurtleReversed,
+            )
 
-            # cv2.putText(
-            #     frame,
-            #     "On: " + str(isTurtleStarted),
-            #     (10, 70),
-            #     cv2.FONT_HERSHEY_PLAIN,
-            #     3,
-            #     (255, 0, 255),
-            #     3,
-            # )
+            # use direction from here for turtlesim input
+            direction = turtle_direction(
+                frame,
+                angle_radians,
+                detector.isTurtleStarted,
+                detector.isTurtleReversed,
+            )
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         cv2.imshow("frame", frame)
