@@ -295,6 +295,51 @@ def calculate_hand_angle(circle_center, hand_center):
     return angle_radians
 
 
+#### TurtleBot publish
+ROS2_EXISTS = False
+try:
+    import rclpy
+    from rclpy.node import Node
+    from geometry_msgs.msg import Twist
+
+    rclpy.init()
+    turtleNode  = Node('hand_tracking_node')
+    turtleNode_pub = turtleNode.create_publisher(Twist, '/cmd_vel', 10)
+
+    def transform_direction(direction:str) -> Twist:
+        move_cmd = Twist()
+        speed = 0.05
+
+        direction = direction.lower()
+        if direction == 'forward':
+            move_cmd.linear.x = speed
+            move_cmd.angular.z = 0.0
+        elif direction == 'backward':
+            move_cmd.linear.x = -speed
+            move_cmd.angular.z = 0.0
+        elif direction == 'left':
+            move_cmd.linear.x = 0.0
+            move_cmd.angular.z = speed*4
+        elif direction == 'right':
+            move_cmd.linear.x = 0.0
+            move_cmd.angular.z = -speed*4
+        else:
+            #self.get_logger().warn("Unknown direction: %s" % direction)
+            move_cmd.linear.x = 0.0
+            move_cmd.angular.z = 0.0
+        
+        return move_cmd
+
+    ROS2_EXISTS = True
+except ImportError as e:
+    print("Error importing rclpy.")
+
+
+
+
+#### MAIN 
+
+
 def main():
     cap = cv2.VideoCapture(0)
     detector = HandTrackingDynamic()
@@ -337,6 +382,10 @@ def main():
                 detector.isTurtleStarted,
                 detector.isTurtleReversed,
             )
+
+            # Publish to turtlebot
+            if ROS2_EXISTS:
+                turtleNode_pub.publish(transform_direction(direction))
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         cv2.imshow("frame", frame)
