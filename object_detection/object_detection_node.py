@@ -3,6 +3,10 @@ import torch
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
+import warnings 
+
+# Supress FutureWarning message
+warnings.filterwarnings('ignore', category=FutureWarning, message=".*torch.cuda.amp.autocast.*")
 
 # Load YOLOv5 model from PyTorch Hub
 model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
@@ -41,9 +45,19 @@ class ObjectDetectionNode(Node):
         
         # Check if the target object is detected
         detected = False
+        distance = None
         for i in range(len(labels)):
             if model.names[int(labels[i])] == self.target_object:
                 detected = True
+                # Calculate distance based on bounding box size
+                row = cords[i]
+                x1, y1, x2, y2, conf = row
+                width = x2 - x1 
+                height = y2 - y1 
+                size = width * height
+                # Estimate distance to object
+                distance = 1 / (size + 1e-6) # Add very small value to prevent zero div
+                self.get_logger().info(f"Estimated distance to object {self.target_object}: {distance:.2f}")
                 break
         
         # Publish a velocity command based on detection
@@ -53,7 +67,7 @@ class ObjectDetectionNode(Node):
             self.get_logger().info(f"{self.target_object} detected. Moving turtle forward.")
         else:
             twist.linear.x = 0.0  # Stop if the object is not detected
-            self.get_logger().info(f"{self.target_object} not detected. Turtle is stopped.")
+            #self.get_logger().info(f"{self.target_object} not detected. Turtle is stopped.")
         
         self.publisher_.publish(twist)
         
