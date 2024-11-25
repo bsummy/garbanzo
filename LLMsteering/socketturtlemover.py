@@ -5,7 +5,8 @@ from geometry_msgs.msg import Twist
 import socket
 
 """
-connects to llminstruct.py by socket to avoid version problems
+Handles sending movement instructions to the robot.
+Connects to llminstruct.py by socket to avoid version problems.
 """
  
 class TurtleAIController(Node):
