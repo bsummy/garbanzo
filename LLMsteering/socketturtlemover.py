@@ -3,6 +3,10 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 import socket
+
+"""
+connects to llminstruct.py by socket to avoid version problems
+"""
  
 class TurtleAIController(Node):
     def __init__(self):
